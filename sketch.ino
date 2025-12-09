@@ -1,0 +1,181 @@
+#include <Arduino.h>
+
+/*
+  Beschreibung:
+  - Der PC sendet Ausdrücke wie "12+5" über UART.
+  - Der Arduino liest den Text, sucht den Operator,
+    rechnet das Ergebnis aus und sendet es zurück.
+  - Zusätzlich speichert der Arduino jede gültige Rechnung
+    in einer kleinen History, die man später anzeigen kann.
+*/
+
+// Eingabe zwischenspeichern
+String inputString = "";
+bool inputComplete = false;
+
+// kleine History (max 50 Einträge)
+String history[50];
+int historyCount = 0;
+
+/*
+  Diese Funktion sucht im Ausdruck den Operator.
+  Man startet ab Index 1, damit ein führendes Minus
+  (z.B. -5+3) nicht als Operator erkannt wird.
+*/
+int findOperatorPosition(const String &s, char *opOut) {
+  for (int i = 1; i < s.length(); i++) {
+    char c = s[i];
+    if (c == '+' || c == '-' || c == '*' || c == '/') {
+      *opOut = c;
+      return i;   // Position gefunden
+    }
+  }
+  return -1; // kein Operator gefunden
+}
+
+/*
+  Hier fügt man einen neuen Eintrag der History hinzu.
+  Jeder Eintrag besteht aus dem Ausdruck + Ergebnis.
+*/
+void addToHistory(String expr, double result) {
+  if (historyCount < 50) {
+    history[historyCount] = expr + " = " + String(result, 2);
+    historyCount++;
+  }
+}
+
+/*
+  Gibt die komplette History aus.
+  Wenn noch keine Rechnung gemacht wurde,
+  gibt man eine kurze Info, Keine Einträge in der Histroy, aus.
+*/
+void printHistory() {
+  if (historyCount == 0) {
+    Serial.println("Keine Eintraege in der History.");
+    return;
+  }
+
+  Serial.println("Rechen-History:");
+  for (int i = 0; i < historyCount; i++) {
+    Serial.println(history[i]);
+  }
+  Serial.println(); // Leerzeile für Übersicht
+}
+
+/*
+  Diese Funktion verarbeitet einen Ausdruck wie "12+5".
+  Schritte:
+  1. Eingabe bereinigen
+  2. Operator finden
+  3. Zahlen extrahieren
+  4. Ergebnis berechnen
+  5. Ausdruck + Ergebnis zurücksenden
+*/
+void processExpression(const String &expr) {
+  String s = expr;
+
+  // Steuerzeichen und Leerzeichn entfernen
+  s.replace("\r", "");
+  s.replace("\n", "");
+  s.replace(" ", "");
+
+  // Wenn man die History sehen möchte
+  if (s == "history" || s == "rechenhistory" || s == "rechen history") {
+    printHistory();
+    return;
+  }
+
+  if (s.length() == 0) {
+    Serial.println("ERROR: Leere Eingabe");
+    return;
+  }
+
+  // Operator suchen
+  char op = 0;
+  int pos = findOperatorPosition(s, &op);
+
+  // prüfen ob der Ausdruck logisch ist
+  if (pos <= 0 || pos >= s.length() - 1) {
+    Serial.print("ERROR: ungueltiger Ausdruck: ");
+    Serial.println(s);
+    return;
+  }
+
+  // Zahlen links und rechts holn
+  String left = s.substring(0, pos);
+  String right = s.substring(pos + 1);
+
+  // Strings in Zahlen umwandeln
+  double a = left.toFloat();
+  double b = right.toFloat();
+  double result = 0.0;
+  bool ok = true;
+
+  // Rechnen je nach Operator
+  switch (op) {
+    case '+': result = a + b; break;
+    case '-': result = a - b; break;
+    case '*': result = a * b; break;
+    case '/':
+      if (b == 0) {
+        Serial.println("ERROR: Division durch 0");
+        ok = false;
+      } else {
+        result = a / b;
+      }
+      break;
+
+    default:
+      Serial.println("ERROR: unbekannter Operator");
+      ok = false;
+  }
+
+  // Wenn alles ok ist, Ergebnis senden und History speichern
+  if (ok) {
+    Serial.println(s);         // Ausdruck anzeigen
+    Serial.print("Ergebnis = ");
+    Serial.println(result, 2); // Ergebnis mit 2 Nachkommastelen
+    Serial.println();          // Leerzeile
+
+    addToHistory(s, result);   // in History speichern
+  }
+}
+
+/*
+  setup() wird beim Start einmal ausgeführt.
+  Hier startet man die serielle Verbindung.
+*/
+void setup() {
+  Serial.begin(9600);
+  Serial.println("READY: Arduino Taschenrechner gestartet.");
+}
+
+/*
+  loop() läuft ständig.
+  - Man liest alle Zeichen vom PC
+  - Wenn man ein ENTER bekommt → Ausdruck fertig
+*/
+void loop() {
+
+  // Zeichen einlesen
+  while (Serial.available()) {
+    char c = (char)Serial.read();
+
+    if (c == '\r') continue; // CR ignorieren
+
+    if (c == '\n') {
+      inputComplete = true; // ENTER → fertig
+    } else {
+      inputString += c;     // Zeichen anhängen
+    }
+  }
+
+  // Wenn der Ausdruck komplett ist
+  if (inputComplete) {
+    processExpression(inputString);
+
+    // für die nächste Eingabe zurücksetzen
+    inputString = "";
+    inputComplete = false;
+  }
+}
